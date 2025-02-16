@@ -6,7 +6,7 @@ class StepperMotor:
     
     VALID_MICROSTEPS = {1, 2, 4, 8, 16}  # Define valid step sizes
     
-    def __init__(self, homingPin=None, stepPin = None, dirPin = None, disablePin = None):
+    def __init__(self, stepPin=None, dirPin=None, disablePin=None, homingPin=None, counterPin=None):
         """
         Initialize the StepperMotor with stepping pin, direction pin, disable pin, and optional homing pin.
 
@@ -17,24 +17,24 @@ class StepperMotor:
             sys.exit(1)
         self.currentPosition = None  # Current step position
         self.currentSpeed = None
-        self.stepPin = stepPin
-        self.dirPin = dirPin
-        self.disablePin = disablePin
         self.homingPin = homingPin  # Homing pin (optional)
         self.stepDivider = 1  # Default to full step mode
         self.MAX_RPM = 600 # Maximum RPM for the motor
         self.direction = 1  # Default direction is positive
 
         # Initialize pins
-        Pin(self.stepPin, Pin.OUT).value(0)
-        Pin(self.dirPin, Pin.OUT).value(0)
-        Pin(self.disablePin, Pin.OUT).value(1)
+        self.stepPin = Pin(stepPin, Pin.OUT)
+        self.stepPin.value(0)
+        self.dirPin = Pin(dirPin, Pin.OUT)
+        self.dirPin.value(1)
+        self.disablePin = Pin(disablePin, Pin.OUT)
+        self.disablePin.value(1)
         if self.homingPin is not None:
             Pin(self.homingPin, Pin.IN, Pin.PULL_UP)
 
     def enableMotor(self):
         """Enable the motor by setting the disable pin to low."""
-        Pin(self.disablePin, Pin.OUT).value(0)
+        self.disablePin.value(0)
         print("Motor enabled")
     
     def disableMotor(self):
@@ -59,39 +59,53 @@ class StepperMotor:
         self.stepDivider = stepDivider
         print(f"Microstepping set to {stepDivider}. Microstepping must be set on the physical driver as well!!")
 
-    def moveSteps(self, steps):
+    def step(self, steps):
         """
         Move the motor by a certain number of steps.
 
         :param steps: Number of steps to move (positive or negative)
         """
-        for _ in range(abs(steps)):
-            Pin(self.stepPin, Pin.OUT).value(1)
-            Pin(self.stepPin, Pin.OUT).value(0)
+        if steps > 0:
+            Pin(self.dirPin, Pin.OUT).value(self.direction)
+            for _ in range(abs(steps)):
+                Pin(self.stepPin, Pin.OUT).value(1)
+                Pin(self.stepPin, Pin.OUT).value(0)
+        if steps < 0:
+            Pin(self.dirPin, Pin.OUT).value(-self.direction)
+            for _ in range(abs(steps)):
+                self.stepPin.value(1)
+                self.stepPin.value(0)
+        self.position += steps*self.direction
+            
         print(f"Motor moved {steps} steps. New position: {self.position}")
         
     def setSpeed(self, rpm):
         """
         Set the motor speed in revolutions per minute (RPM).
         
-        :param rpm: Speed in RPM (must be positive)
+        :param rpm: Speed in RPM (positive or negative)
         """        
+        # Convert RPM to Hz
         steps_per_revolution = 200 * self.stepDivider  # Assuming a 1.8° stepper (200 steps/full rotation)
         self.speed = (rpm * steps_per_revolution) / 60  # Convert RPM to steps/sec
         
+        # Check if speed exceeds maximum
         if self.speed > self.MAX_RPM * steps_per_revolution / 60:
             print(f"Error: Speed {rpm} RPM exceeds max speed ({self.MAX_RPM} rotations/min)")
             sys.exit(1)
         
-        pwm = PWM(Pin(self.stepPin))
-        pwm.duty(512)
-        pwm.freq(self.speed)
+        # Turn on PWM and set direction
+        pwm = PWM(Pin(self.stepPin), duty_u16 = 32768)
+        pwm.freq(int(self.speed))
         if rpm*self.direction < 0:
-            Pin(self.dirPin, Pin.OUT).value(1)
+            self.dirPin.value(1)
         else:
-            Pin(self.dirPin, Pin.OUT).value(0)
+            self.dirPin.value(0)
+
+        # Update current speed
         self.currentSpeed = rpm
 
+        # Debug Statement
         print(f"Speed set to {rpm} RPM ({self.speed:.2f} steps per second)")
 
     def homeMotorReverse(self, speed = -60):
@@ -116,3 +130,8 @@ class StepperMotor:
         print(f"Homing motor using pin {self.homingPin}...")
         self.position = 0  # Reset position
         print("Motor homed successfully.")
+
+motor = StepperMotor(stepPin = 17, dirPin = 16, disablePin = 7, homingPin = 4)
+motor.enableMotor()
+motor.setMicroStep(8)
+motor.setSpeed(300)
